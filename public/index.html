@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SecureBank</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Serif:wght@600&display=swap">
+<style>
+:root{--bg:#eef1f4;--ink:#14213d;--mut:#5b6778;--line:#d5dbe3;--ac:#0f5c5c;--ok:#1b7a43;--warn:#b45309;--bad:#b42318}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:var(--ink);color:#fff}
+main{max-width:1040px;margin:24px auto;padding:0 16px;display:grid;gap:20px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:6px;padding:18px}
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+h2,h3{margin:0 0 10px}
+input,button{font:inherit;padding:10px;border-radius:4px;border:1px solid var(--line);width:100%;margin:4px 0}
+button{background:var(--ac);color:#fff;border:0;font-weight:600;cursor:pointer}
+button.quiet{background:none;color:var(--ac);border:1px solid var(--ac);width:auto;padding:4px 10px;margin:0}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #7cc4c4;outline-offset:1px}
+.balance{font:600 36px "IBM Plex Serif",serif}
+.mut{color:var(--mut)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+.SUCCESS{color:var(--ok)}.FLAGGED{color:var(--warn)}.BLOCKED{color:var(--bad)}
+.st{font-weight:600}
+.err{color:var(--bad)}
+.live{border-left:5px solid var(--bad)}
+@media(prefers-reduced-motion:no-preference){.live{animation:pulse 1s 2}}
+@keyframes pulse{50%{background:#fdecea}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect } = React;
+const inr = n => '₹' + Number(n).toLocaleString('en-IN');
+const when = t => new Date(t).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+let token = '';
+
+async function api(path, body) {
+  const r = await fetch('/api' + path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: body && JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Something went wrong');
+  return d;
+}
+
+function Auth({ onLogin }) {
+  const [mode, setMode] = useState('login'), [f, setF] = useState({}), [ch, setCh] = useState(null);
+  const [otp, setOtp] = useState(''), [msg, setMsg] = useState('');
+  const set = k => e => setF({ ...f, [k]: e.target.value });
+  const run = fn => async () => { try { setMsg(''); await fn(); } catch (e) { setMsg(e.message); } };
+  const login = run(async () => setCh(await api('/login', f)));
+  const register = run(async () => { await api('/register', f); setMode('login'); setMsg('Account created. Log in to continue.'); });
+  const verify = run(async () => { const d = await api('/verify-otp', { challenge: ch.challenge, otp }); token = d.token; onLogin(d.user); });
+  return (
+    <div className="panel" style={{ maxWidth: 380, margin: '60px auto' }}>
+      <h2>SecureBank</h2>
+      {ch ? <>
+        <p>Enter the 6-digit code we sent you.<br /><small className="mut">Demo code: <b>{ch.demoOtp}</b></small></p>
+        <input value={otp} onChange={e => setOtp(e.target.value)} maxLength={6} inputMode="numeric" placeholder="6-digit code" />
+        <button onClick={verify}>Verify and log in</button>
+      </> : <>
+        {mode === 'register' && <input placeholder="Full name" onChange={set('name')} />}
+        <input placeholder="Email" onChange={set('email')} />
+        <input type="password" placeholder="Password (8+ characters)" onChange={set('password')} />
+        <button onClick={mode === 'login' ? login : register}>{mode === 'login' ? 'Log in' : 'Create account'}</button>
+        <p><a href="#" onClick={e => { e.preventDefault(); setMode(mode === 'login' ? 'register' : 'login'); }}>
+          {mode === 'login' ? 'Open a new account' : 'Back to log in'}</a></p>
+        <small className="mut">Admin demo: admin@bank.com / Admin@123</small>
+      </>}
+      <p className="err">{msg}</p>
+    </div>
+  );
+}
+
+function Dashboard({ user, setUser }) {
+  const [tx, setTx] = useState([]), [res, setRes] = useState(null), [err, setErr] = useState('');
+  const [f, setF] = useState({ toAccount: '', amount: '', note: '' });
+  const load = async () => { setTx(await api('/transactions')); setUser(await api('/me')); };
+  useEffect(() => { load(); }, []);
+  const set = k => e => setF({ ...f, [k]: e.target.value });
+  const send = async () => {
+    try { setErr(''); setRes(await api('/transfer', f)); load(); } catch (e) { setErr(e.message); setRes(null); }
+  };
+  const msgs = { SUCCESS: 'Transfer complete.', FLAGGED: 'Transfer sent, but our fraud team will review it.', BLOCKED: 'Transfer blocked for your safety.' };
+  return <>
+    <div className="grid">
+      <div className="panel">
+        <div className="mut">Account {user.account}</div>
+        <div className="balance">{inr(user.balance)}</div>
+        <div className="mut">Available balance</div>
+      </div>
+      <div className="panel">
+        <h3>Send money</h3>
+        <input placeholder="Recipient account number" value={f.toAccount} onChange={set('toAccount')} />
+        <input type="number" placeholder="Amount in ₹" value={f.amount} onChange={set('amount')} />
+        <input placeholder="Note (optional)" value={f.note} onChange={set('note')} />
+        <button onClick={send}>Send money</button>
+        {err && <p className="err">{err}</p>}
+        {res && <p className={res.status}><b>{msgs[res.status]}</b> {res.reasons.join('. ')}</p>}
+      </div>
+    </div>
+    <div className="panel scroll">
+      <h3>Transaction history</h3>
+      <table>
+        <thead><tr><th>Date</th><th>Details</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>
+          {tx.length === 0 && <tr><td colSpan="4" className="mut">No transactions yet. Send money to get started.</td></tr>}
+          {tx.map(t => { const out = t.from === user.id; return (
+            <tr key={t.id}><td>{when(t.time)}</td>
+              <td>{out ? 'To ' + t.toName : 'From ' + t.fromName}{t.note && <span className="mut"> · {t.note}</span>}</td>
+              <td>{out ? '−' : '+'}{inr(t.amount)}</td><td className={'st ' + t.status}>{t.status}</td></tr>); })}
+        </tbody>
+      </table>
+    </div>
+  </>;
+}
+
+function Admin() {
+  const [d, setD] = useState(null), [live, setLive] = useState(null);
+  const load = async () => setD(await api('/admin/overview'));
+  useEffect(() => {
+    load();
+    const es = new EventSource('/api/admin/stream?token=' + token);
+    es.onmessage = e => { setLive(JSON.parse(e.data)); load(); };
+    return () => es.close();
+  }, []);
+  if (!d) return null;
+  const act = path => async () => { await api(path, {}); load(); };
+  return <>
+    {live && <div className="panel live"><b>New alert:</b> {live.name}, risk {live.score}/100. {live.reasons.join('. ')}</div>}
+    <div className="grid">
+      <div className="panel"><div className="mut">Money moved</div><div className="balance">{inr(d.stats.volume)}</div></div>
+      <div className="panel"><div className="mut">Open alerts</div><div className="balance">{d.stats.open}</div></div>
+      <div className="panel"><div className="mut">Blocked transfers</div><div className="balance">{d.stats.blocked}</div></div>
+    </div>
+    <div className="panel scroll"><h3>Fraud alerts</h3>
+      <table><thead><tr><th>Time</th><th>Customer</th><th>Risk</th><th>Reasons</th><th></th></tr></thead><tbody>
+        {d.alerts.length === 0 && <tr><td colSpan="5" className="mut">No alerts. Risky transfers will appear here instantly.</td></tr>}
+        {d.alerts.map(a => <tr key={a.id}><td>{when(a.time)}</td><td>{a.name}</td>
+          <td className={'st ' + (a.score >= 70 ? 'BLOCKED' : 'FLAGGED')}>{a.score}</td><td>{a.reasons.join(', ')}</td>
+          <td>{a.resolved ? <span className="mut">Resolved</span> : <button className="quiet" onClick={act('/admin/alerts/' + a.id + '/resolve')}>Resolve</button>}</td></tr>)}
+      </tbody></table></div>
+    <div className="panel scroll"><h3>Customers</h3>
+      <table><thead><tr><th>Name</th><th>Account</th><th>Balance</th><th></th></tr></thead><tbody>
+        {d.users.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.account}</td><td>{inr(u.balance)}</td>
+          <td><button className="quiet" onClick={act('/admin/users/' + u.id + '/freeze')}>{u.frozen ? 'Unfreeze account' : 'Freeze account'}</button></td></tr>)}
+      </tbody></table></div>
+    <div className="panel scroll"><h3>All transactions</h3>
+      <table><thead><tr><th>Time</th><th>From</th><th>To</th><th>Amount</th><th>Risk</th><th>Status</th></tr></thead><tbody>
+        {d.txns.map(t => <tr key={t.id}><td>{when(t.time)}</td><td>{t.fromName}</td><td>{t.toName}</td>
+          <td>{inr(t.amount)}</td><td>{t.risk}</td><td className={'st ' + t.status}>{t.status}</td></tr>)}
+      </tbody></table></div>
+  </>;
+}
+
+function App() {
+  const [user, setUser] = useState(null);
+  if (!user) return <Auth onLogin={setUser} />;
+  return <>
+    <header><b>SecureBank{user.role === 'admin' && ' · Fraud monitoring'}</b>
+      <span>{user.name}{' '}<button className="quiet" style={{ color: '#fff', borderColor: '#fff' }} onClick={() => { token = ''; setUser(null); }}>Log out</button></span></header>
+    <main>{user.role === 'admin' ? <Admin /> : <Dashboard user={user} setUser={setUser} />}</main>
+  </>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
