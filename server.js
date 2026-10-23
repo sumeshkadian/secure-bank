@@ -125,5 +125,5 @@ app.get('/api/admin/stream', auth('admin'), (req, res) => {   // real-time alert
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.flushHeaders(); clients.add(res); req.on('close', () => clients.delete(res));
 });
-
-app.listen(3000, () => console.log('SecureBank running at http://localhost:3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`SecureBank running on port ${PORT}`));
